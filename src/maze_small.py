@@ -17,7 +17,8 @@
 #   3. 組長は迷路を作り，1機で全探索して木を得る（全マスを見たら戻らずに止める）．
 #      その木を閉じ込めた相棒を生成する．集めた機体はその場に残り，新しい宝に
 #      木の上で一番近い機体が取りに行く（待機地点へ戻す方式より，迷路ごとの
-#      ばらつきが小さい．tools/cost_models/maze_policy.py）
+#      ばらつきが小さい．tools/cost_models/maze_policy.py）．待っている機体は動かない
+#      （反対側の待機地点へ歩かせる案は遅くなった．tools/cost_models/maze_idle2.py）
 #   4. 宝の出現を数え，301個目は再配置せずに収穫する．use_item が失敗したとき
 #      （上限）も収穫する（予備）
 #
@@ -32,6 +33,7 @@ TARGET = 9863168     # 「開始時の所持金＋この額」まで集めたら
 SIDE = 8             # 1つの迷路の一辺
 MAX_TREASURE = 301   # 1つの迷路で集める宝の数（再配置300回＋収穫1回）
 FLAG_WAIT = 600      # 旗が合図を見届けてから消えるまでの tick
+SAME_CELL_WAIT = 250 # 宝が足元に出たとき，再配置の前に待つ tick
 DEBUG = False
 
 DIRS = [North, East, South, West]
@@ -135,7 +137,7 @@ def bfs_tree(adj, root, m):
 				pdir[nc] = a[j + 1]
 				q.append(nc)
 			j += 2
-	return [parent, pdir, depth]
+	return [parent, pdir, depth, q]
 
 
 def tdist(a, b, tree):
@@ -156,13 +158,16 @@ def tdist(a, b, tree):
 	return d
 
 
-def nearest(pos, tk, tree):
-	# 宝に一番近い機体（同じなら番号の小さい方）
-	best = 0
-	bd = tdist(pos[0], tk, tree)
-	for i in range(1, len(pos)):
-		d = tdist(pos[i], tk, tree)
-		if d < bd:
+def decide(idx, pos, lk, mylen, tree):
+	# 宝に一番近い機体（同じなら番号の小さい方）．自分の距離は，自分の経路の長さ
+	# mylen をそのまま使う（木の上の距離なので，他の機体が tdist で求める値と一致する）
+	best = -1
+	bd = 0
+	for i in range(len(pos)):
+		d = mylen
+		if i != idx:
+			d = tdist(pos[i], lk, tree)
+		if best < 0 or d < bd:
 			bd = d
 			best = i
 	return best
@@ -196,13 +201,16 @@ def path(a, b, tree):
 # 宝を集める（1迷路に k 機．idx は自分の番号）
 #   担当の決め方：集めた機体はその場に残り，新しい宝に（木の上で）一番近い
 #   機体が取りに行く．全機が同じ宝の列を見ているので，互いの位置 pos を
-#   通信なしで同じように更新できる（待っている機体は measure() を見続けるので
+#   通信なしで同じように更新できる（待っている機体は動かず measure() を見続けるので
 #   宝の移動を見逃さない．取りに行った機体の移動中は，宝は動かない）
 #   cnt : これまでに現れた宝の数（最初の宝を1とする），last : いまの宝
+#   walked : DEBUG 用．取りに行った歩数を足していく
 # ------------------------------------------------------------
-def collect(idx, m, x0, y0, tree, pos, sub, cnt, last):
+def collect(idx, m, x0, y0, tree, pos, sub, cnt, last, walked):
 	lk = (last[0] - x0) * m + last[1] - y0
-	own = nearest(pos, lk, tree)
+	plan = path(pos[idx], lk, tree)
+	own = decide(idx, pos, lk, len(plan), tree)
+	t_seen = get_tick_count()
 	stuck = 0
 	while True:
 		t = measure()
@@ -213,12 +221,24 @@ def collect(idx, m, x0, y0, tree, pos, sub, cnt, last):
 			cnt += 1
 			last = t
 			lk = (t[0] - x0) * m + t[1] - y0
-			own = nearest(pos, lk, tree)
+			plan = path(pos[idx], lk, tree)
+			own = decide(idx, pos, lk, len(plan), tree)
+			t_seen = get_tick_count()
 			stuck = 0
 		if own == idx:
-			cur = (get_pos_x() - x0) * m + get_pos_y() - y0
-			for d in path(cur, lk, tree):
+			if len(plan) == 0:
+				# 宝が足元に出た．すぐ再配置すると，直前に再配置した機体がこの宝を
+				# 見る前に次の宝へ変わり，宝の数と位置の記録が食い違うおそれがある
+				# （use_item の効果が 200 tick の始めに出る場合．シミュレータで発生．
+				# 実機は不明）．少し待つ
+				w = 0
+				while get_tick_count() - t_seen < SAME_CELL_WAIT:
+					w += 1
+			if DEBUG:
+				walked[0] += len(plan)
+			for d in plan:
 				move(d)
+			plan = []
 			if cnt >= MAX_TREASURE:
 				harvest()
 				return cnt
@@ -236,7 +256,9 @@ def make_partner(idx, m, x0, y0, tree, pos, sub, cnt, last):
 		p = []
 		for v in pos:
 			p.append(v)        # 念のため自分用に写す
-		collect(idx, m, x0, y0, tree, p, sub, cnt, last)
+		wk = [0]
+		collect(idx, m, x0, y0, tree, p, sub, cnt, last, wk)
+		return wk[0]
 	return run
 
 
@@ -284,13 +306,19 @@ def leader(bx, by, m, k, total, sub):
 	pos = []
 	for i in range(k):
 		pos.append(here)
+	hs = []
 	for i in range(1, k):
 		h = spawn_drone(make_partner(i, m, x0, y0, tree, pos, sub, 1, last))
 		while h == None:
 			h = spawn_drone(make_partner(i, m, x0, y0, tree, pos, sub, 1, last))
-	c = collect(0, m, x0, y0, tree, pos, sub, 1, last)
+		hs.append(h)
+	wk = [0]
+	c = collect(0, m, x0, y0, tree, pos, sub, 1, last, wk)
 	if DEBUG:
-		quick_print("maze", bx, by, "count", c, "end", get_tick_count())
+		for h in hs:
+			wk[0] += wait_for(h)
+		# 取りに行った歩数の合計（待っている機体の移動は含まない）
+		quick_print("maze", bx, by, "count", c, "steps", wk[0], "end", get_tick_count())
 
 
 def make_leader(bx, by, m, k, total, sub):

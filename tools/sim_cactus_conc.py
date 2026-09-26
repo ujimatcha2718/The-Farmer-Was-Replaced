@@ -20,6 +20,17 @@ MAXD = int(sys.argv[4]) if len(sys.argv) > 4 else 32
 import os
 GROW = int(os.environ.get('GROW','400'))
 NOMEAS = os.environ.get('NOMEAS')=='1'
+# ソース1行あたりの費用（tick）．0 なら数えない．実機の校正値は約 2.37（推定）
+LINE = float(os.environ.get('LINE', '0'))
+
+
+def _trace(frame, event, arg):
+    # ゲームのコード（SRC）の行だけを数える
+    if frame.f_code.co_filename != SRC:
+        return None
+    if event == 'line':
+        local.d.pending += LINE
+    return _trace
 
 North, East, South, West = "N", "E", "S", "W"
 DXY = {North: (0, 1), East: (1, 0), South: (0, -1), West: (-1, 0)}
@@ -47,6 +58,7 @@ class Drone:
         self.blocked = False
         self.thread = None
         self.ret = None
+        self.pending = 0.0   # まだ時計に入れていないソース行の費用
 
 
 cond = threading.Condition()
@@ -84,6 +96,9 @@ def me():
 def act(cost, fn):
     d = me()
     with cond:
+        if d.pending:
+            d.clock += d.pending
+            d.pending = 0.0
         while True:
             m = None
             for o in DRONES:
@@ -117,7 +132,7 @@ def num_items(it):
 
 
 def get_tick_count():
-    return me().clock
+    return me().clock + me().pending
 
 
 def quick_print(*a):
@@ -300,6 +315,8 @@ def max_drones():
 
 def _runner(child, fn):
     local.d = child
+    if LINE > 0:
+        sys.settrace(_trace)
     try:
         fn()
     finally:
@@ -335,6 +352,9 @@ def spawn_drone(fn):
 
 def wait_for(h):
     d = me()
+    with cond:
+        d.clock += d.pending
+        d.pending = 0.0
     saved = d.clock
     with cond:
         d.blocked = True
@@ -384,7 +404,29 @@ root = Drone(0, 0, 0)
 DRONES.append(root)
 local.d = root
 sys.setrecursionlimit(100000)
-exec(compile(src, SRC, "exec"), env)
+# ゲームではリストの添字に float を使える．Python では使えないので，
+# 添字をすべて _ix() で包んで整数に直す（整数値でない float は誤りとして止める）
+class _IxWrap(ast.NodeTransformer):
+    def visit_Subscript(self, node):
+        self.generic_visit(node)
+        if not isinstance(node.slice, ast.Slice):
+            node.slice = ast.Call(func=ast.Name(id="_ix", ctx=ast.Load()), args=[node.slice], keywords=[])
+        return node
+
+
+def _ix(i):
+    if isinstance(i, float):
+        assert i == int(i), "添字が整数値でない: %r" % i
+        return int(i)
+    return i
+
+
+env["_ix"] = _ix
+if LINE > 0:
+    sys.settrace(_trace)
+_tree = ast.fix_missing_locations(_IxWrap().visit(ast.parse(src)))
+exec(compile(_tree, SRC, "exec"), env)
+sys.settrace(None)
 root.alive = False
 
 

@@ -26,6 +26,8 @@ DEBUG = False        # True にすると途中経過を出力ページに書き�
 MOVE_TICKS = 200     # move() 1回のtick
 C_EXP_INIT = 150     # A*の1ノード展開あたりのtick（初期推定値．実行中に実測で更新）
 BUDGET_SCALE = 1     # A*予算の倍率（1 = 最大節約手数と同じ時間まで計算してよい）
+USE_ASTAR = False    # A*で近道を探すか．実機6回で A* は宝1個あたり 623 tick かかり，
+                     # 短くなった歩数は 237 tick 分だけだった（差し引き約 386 tick の損）
 START_CENTER = True  # 迷路を盤面中央から生成するか（False で (0,0) から）
 
 DIRS = [North, East, South, West]
@@ -425,7 +427,7 @@ def worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start, stt)
 				stt[2] += L
 			h = abs(cur // n - tx) + abs(cur % n - ty)
 			# 近道の可能性があり（ループ既知），かつ節約余地がある場合だけA*
-			if extra > 0 and L - h >= 2:
+			if USE_ASTAR and extra > 0 and L - h >= 2:
 				budget = (L - h) * MOVE_TICKS * BUDGET_SCALE // c_exp
 				t0 = get_tick_count()
 				res = astar(cur, tk, nb, n, dirmap, budget)

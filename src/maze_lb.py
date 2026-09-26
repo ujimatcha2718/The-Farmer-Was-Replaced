@@ -396,7 +396,11 @@ def assign_owner(stations, parent, children):
 # ------------------------------------------------------------
 # 各ドローンの仕事
 # ------------------------------------------------------------
-def worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start):
+def worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start, stt):
+	# stt（DEBUG 用の集計．呼び出し元へ返す）：
+	#   [0 集めた宝, 1 歩いた歩数, 2 木の経路の長さの合計, 3 A*の回数, 4 A*のtick,
+	#    5 A*で短くなった歩数, 6 経路計算のtick（A*を除く）,
+	#    8 見つけた近道の数]（7 は未使用）
 	n = get_world_size()
 	sub = sub_amount()
 	step = make_step(n)
@@ -413,8 +417,12 @@ def worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start):
 		tk = tx * n + ty
 		cur = get_pos_x() * n + get_pos_y()
 		if owner[tk] == idx:
+			t_seen = get_tick_count()
 			plan = path(cur, tk, parent, pdir, depth)
 			L = len(plan)
+			if DEBUG:
+				stt[6] += get_tick_count() - t_seen
+				stt[2] += L
 			h = abs(cur // n - tx) + abs(cur % n - ty)
 			# 近道の可能性があり（ループ既知），かつ節約余地がある場合だけA*
 			if extra > 0 and L - h >= 2:
@@ -424,8 +432,16 @@ def worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start):
 				used = get_tick_count() - t0
 				if res[1] > 0:
 					c_exp = (c_exp * 3 + used / res[1]) / 4
+				if DEBUG:
+					stt[3] += 1
+					stt[4] += used
 				if res[0] != None and len(res[0]) < L:
+					if DEBUG:
+						stt[5] += L - len(res[0])
 					plan = res[0]
+			if DEBUG:
+				stt[0] += 1
+				stt[1] += len(plan)
 			walk(plan)
 			gold = num_items(Items.Gold)
 			if gold + per >= target:
@@ -443,13 +459,18 @@ def worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start):
 				harvest()   # 宝が動かなかった（上限判定の予備）
 				return
 		elif cur != home:
-			extra += walk_discover(path(cur, home, parent, pdir, depth), cur, nb, step, n, t)
+			f = walk_discover(path(cur, home, parent, pdir, depth), cur, nb, step, n, t)
+			extra += f
+			if DEBUG:
+				stt[8] += f
 
 
 # spawn_drone へ引数を渡すためのクロージャ
 def make_worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start):
 	def run():
-		worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start)
+		stt = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+		worker(idx, home, parent, pdir, depth, nb, owner, per, target, g_start, stt)
+		return stt
 	return run
 
 
@@ -526,9 +547,16 @@ def main():
 			h = spawn_drone(make_worker(i, stations[i], parent, pdir, depth, nb, owner, per, goal, g_start))
 			if h != None:
 				handles.append(h)
-		worker(0, stations[0], parent, pdir, depth, nb, owner, per, goal, g_start)
+		tot = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+		worker(0, stations[0], parent, pdir, depth, nb, owner, per, goal, g_start, tot)
 		for h in handles:
-			wait_for(h)   # 全員が戻るまで待ってから次の迷路へ
+			r = wait_for(h)   # 全員が戻るまで待ってから次の迷路へ
+			if DEBUG:
+				for i in range(9):
+					tot[i] += r[i]
+		if DEBUG:
+			# 宝の数, 歩数, 木の経路長, A*回数, A*tick, A*短縮歩数, 経路計算tick, 待ち(未使用), 近道
+			quick_print("stats", tot)
 
 	quick_print(get_tick_count())  # 終了時のtick
 

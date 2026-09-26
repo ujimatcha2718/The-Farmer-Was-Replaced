@@ -6,14 +6,14 @@
   ・茂みの上で use_item(Weird_Substance, m * 2**(段階-1)) → 茂みを中心に m x m の迷路
     （範囲は b - m//2 .. b - m//2 + m - 1．実機確認）．迷路は乱択 DFS で作る（作り方は推定）
   ・宝の上で同じ量を use_item → 金 m*m*2**(段階-1)，宝は迷路内の別のマスへ（実機確認）．
-    再配置のたびに確率 WALLP で壁を1つ消す（頻度は推定）．300回を超えると動かない（推定）
+    再配置のたびに確率 WALLP で壁を1つ消す（頻度は 8x8 の実機 probe に合わせた．場所は一様ランダムと推定）．300回を超えると動かない（推定）
   ・宝の上で harvest → 金 m*m*2**(段階-1)，迷路は消えて草に戻る（実機確認）
   ・迷路の中のドローンは壁を越えられない．迷路の外から迷路のマスへは入れない（推定）
   ・複数の迷路を同時に置ける．measure() は自分がいる迷路の宝を返し，迷路の外では None
   ・盤面の端で move は回り込む（実機確認）
 
 引数: src seed [maxdrones] [NAME=value ...]
-環境変数: LINE=ソース1行の費用（既定 2.37．0 にすると待ちの空回りが多すぎて遅い），WALLP=再配置で壁が消える確率（既定 0.3），
+環境変数: LINE=ソース1行の費用（既定 2.37．0 にすると待ちの空回りが多すぎて遅い），WALLP=再配置で壁が消える確率（既定 0.084．実機の8x8で299回に25枚），
           UNLOCK=迷路の段階（既定 6），WS=奇妙な物質の初期量（既定 10**9）
 """
 import ast
@@ -28,7 +28,7 @@ SEED = int(sys.argv[2]) if len(sys.argv) > 2 else 1
 MAXD = int(sys.argv[3]) if len(sys.argv) > 3 else 32
 N = int(os.environ.get('N', '32'))
 LINE = float(os.environ.get('LINE', '2.37'))
-WALLP = float(os.environ.get('WALLP', '0.3'))
+WALLP = float(os.environ.get('WALLP', '0.084'))   # 実機 probe：8x8 で再配置299回に壁25枚
 UNLOCK = int(os.environ.get('UNLOCK', '6'))
 WS0 = int(os.environ.get('WS', str(10 ** 9)))
 UNIT = 2 ** (UNLOCK - 1)
@@ -108,11 +108,18 @@ def me():
     return local.d
 
 
+PROF = {}
+PROFILE = os.environ.get('PROFILE')   # 1 なら関数ごとの実行行数を最後に出す
+
+
 def _trace(frame, event, arg):
     if frame.f_code.co_filename != SRC:
         return None
     if event == 'line':
         local.d.pending += LINE
+        if PROFILE:
+            k = frame.f_code.co_name
+            PROF[k] = PROF.get(k, 0) + 1
     return _trace
 
 
@@ -506,5 +513,8 @@ ok = W.gold >= TARGET
 print("%-22s seed=%d maxd=%d : 金=%d/%d 宝=%d 迷路=%d 移動=%d 壁にぶつかった=%d 物質=%d 実時間=%d  %s"
       % (SRC.split("/")[-1], SEED, MAXD, W.gold, TARGET, W.treasures, W.built, W.moves,
          W.blocked_moves, WS0 - W.ws, root.clock, "OK" if ok else "*** FAIL ***"))
+if PROFILE:
+    for k, v in sorted(PROF.items(), key=lambda kv: -kv[1]):
+        print("  行数 %-14s %d" % (k, v))
 if not ok:
     sys.exit(1)

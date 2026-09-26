@@ -19,7 +19,9 @@
 #      木の上で一番近い機体が取りに行く（待機地点へ戻す方式より，迷路ごとの
 #      ばらつきが小さい．tools/cost_models/maze_policy.py）．待っている機体は動かない
 #      （反対側の待機地点へ歩かせる案は遅くなった．tools/cost_models/maze_idle2.py）
-#   4. 宝の出現を数え，301個目は再配置せずに収穫する．use_item が失敗したとき
+#   4. 再配置のたびに壁がときどき消える（8x8 で299回に25枚．probes/maze_walls_probe.py）．
+#      歩きながら足元の壁を can_move で調べ，見つけた近道を使う（担当の判定は木の距離のまま）
+#   5. 宝の出現を数え，301個目は再配置せずに収穫する．use_item が失敗したとき
 #      （上限）も収穫する（予備）
 #
 #  実行方法（別のコードウィンドウから）:
@@ -34,6 +36,12 @@ SIDE = 8             # 1つの迷路の一辺
 MAX_TREASURE = 301   # 1つの迷路で集める宝の数（再配置300回＋収穫1回）
 FLAG_WAIT = 600      # 旗が合図を見届けてから消えるまでの tick
 SAME_CELL_WAIT = 250 # 宝が足元に出たとき，再配置の前に待つ tick
+SHORTCUT = True      # 再配置で消えた壁（近道）を歩きながら見つけて使うか
+RECHECK = 30         # 同じマスの壁を調べ直すまでの再配置の回数
+ROW_CHUNK = 2        # 待っている間に1回で進める表作り（BFS）のマス数．
+                     # 大きくすると measure() を見る間隔が延び，宝が1歩先で集められた
+                     # ときの再配置（約200 tick で次へ変わる）を見逃して2機の記録が
+                     # 食い違う（8 でシミュレータで起きた）．2 なら間隔は約70 tick（推定）
 DEBUG = False
 
 DIRS = [North, East, South, West]
@@ -173,6 +181,151 @@ def decide(idx, pos, lk, mylen, tree):
 	return best
 
 
+def decide_row(pos, dist):
+	# 表があるとき：距離は表を引くだけ（木の上の距離なので decide と同じ結果になる）
+	best = 0
+	bd = dist[pos[0]]
+	for i in range(1, len(pos)):
+		if dist[pos[i]] < bd:
+			bd = dist[pos[i]]
+			best = i
+	return best
+
+
+def drop_pair(lst, v):
+	# [隣, 向き, ...] から隣が v の組を除いた新しいリスト
+	out = []
+	j = 0
+	while j < len(lst):
+		if lst[j] != v:
+			out.append(lst[j])
+			out.append(lst[j + 1])
+		j += 2
+	return out
+
+
+def wall_dirs(c, adj, m):
+	# c から見て迷路の中にあり，木の辺ではない方向（壁があるはずの方向）[隣, 向き, ...]
+	lx = c // m
+	ly = c % m
+	w = []
+	for d in DIRS:
+		ok = True
+		nb = c
+		if d == North:
+			ok = ly < m - 1
+			nb = c + 1
+		elif d == South:
+			ok = ly > 0
+			nb = c - 1
+		elif d == East:
+			ok = lx < m - 1
+			nb = c + m
+		else:
+			ok = lx > 0
+			nb = c - m
+		if ok:
+			a = adj[c]
+			j = 0
+			while j < len(a):
+				if a[j] == nb:
+					ok = False
+				j += 2
+		if ok:
+			w.append(nb)
+			w.append(d)
+	return w
+
+
+def discover(cur, walls, ext, adj, m):
+	# 足元の壁を can_move で調べ，消えていれば近道として覚える
+	if walls[cur] == None:
+		walls[cur] = wall_dirs(cur, adj, m)
+	wl = walls[cur]
+	j = 0
+	while j < len(wl):
+		if can_move(wl[j + 1]):
+			nb = wl[j]
+			d = wl[j + 1]
+			ext[cur].append(nb)
+			ext[cur].append(d)
+			ext[nb].append(cur)
+			ext[nb].append(OPP[d])
+			walls[cur] = drop_pair(walls[cur], nb)
+			if walls[nb] != None:
+				walls[nb] = drop_pair(walls[nb], cur)
+			wl = walls[cur]
+		else:
+			j += 2
+
+
+# ------------------------------------------------------------
+# 宝の位置ごとの表（木の上）：dist[x] = x から宝までの距離，nh[x] = 宝へ向かう次の向き
+#   1つ作るのに木の BFS 1回（約 2000 tick，推定）．待っている間に少しずつ作り（row_steps），
+#   できた表は使い回す．宝の位置は64通りなので，途中からはほぼ表を引くだけになる
+# ------------------------------------------------------------
+def row_start(t, m):
+	dist = []
+	nh = []
+	for i in range(m * m):
+		dist.append(-1)
+		nh.append(None)
+	dist[t] = 0
+	return [t, dist, nh, [t], 0]
+
+
+def row_steps(st, adj, k):
+	# BFS を最大 k マスぶん進める．終わったら True
+	dist = st[1]
+	nh = st[2]
+	q = st[3]
+	h = st[4]
+	while h < len(q) and k > 0:
+		c = q[h]
+		h += 1
+		a = adj[c]
+		j = 0
+		while j < len(a):
+			nb = a[j]
+			if dist[nb] < 0:
+				dist[nb] = dist[c] + 1
+				nh[nb] = OPP[a[j + 1]]
+				q.append(nb)
+			j += 2
+		k -= 1
+	st[4] = h
+	return h >= len(q)
+
+
+def walk_row(cur, lk, row, walls, ext, chk, cnt, step, adj, m):
+	# 表を使って cur から lk へ歩く．戻り値：歩いた歩数
+	#   ・足元の壁は，前に調べてから RECHECK 回以上再配置があったマスだけ調べる
+	#   ・足元に覚えた近道があり，その先の方が宝に（木の上で）近ければ跳ぶ
+	dist = row[0]
+	nh = row[1]
+	n = 0
+	while cur != lk:
+		if chk[cur] <= cnt:
+			discover(cur, walls, ext, adj, m)
+			chk[cur] = cnt + RECHECK
+		d = nh[cur]
+		nb = cur + step[d]
+		e = ext[cur]
+		if len(e) > 0:
+			best = dist[nb]
+			j = 0
+			while j < len(e):
+				if dist[e[j]] < best:
+					best = dist[e[j]]
+					nb = e[j]
+					d = e[j + 1]
+				j += 2
+		move(d)
+		cur = nb
+		n += 1
+	return n
+
+
 def path(a, b, tree):
 	parent = tree[0]
 	pdir = tree[1]
@@ -206,27 +359,52 @@ def path(a, b, tree):
 #   cnt : これまでに現れた宝の数（最初の宝を1とする），last : いまの宝
 #   walked : DEBUG 用．取りに行った歩数を足していく
 # ------------------------------------------------------------
-def collect(idx, m, x0, y0, tree, pos, sub, cnt, last, walked):
+def collect(idx, m, x0, y0, tree, adj, pos, sub, cnt, last, walked):
+	n = m * m
+	rows = []                # rows[t] = [dist, nh]（宝の位置 t ごとの表．まだなら None）
+	ext = []                 # 自分が見つけた近道 ext[c] = [隣, 向き, ...]
+	walls = []               # walls[c] = まだ壁がある（はずの）方向．初めて調べるときに作る
+	chk = []                 # chk[c]：宝の数がこれになったら c の壁を調べ直す
+	for i in range(n):
+		rows.append(None)
+		ext.append([])
+		walls.append(None)
+		chk.append(0)
+	step = {North: 1, South: -1, East: m, West: -m}
+	bst = None               # 待っている間に作っている表（BFS の途中）
+	nxt = 0                  # 次に表を作る宝の位置の候補
 	lk = (last[0] - x0) * m + last[1] - y0
-	plan = path(pos[idx], lk, tree)
-	own = decide(idx, pos, lk, len(plan), tree)
+	plan = []
+	if SHORTCUT:
+		own = -1
+	else:
+		plan = path(pos[idx], lk, tree)
+		own = decide(idx, pos, lk, len(plan), tree)
 	t_seen = get_tick_count()
 	stuck = 0
+	first = True
 	while True:
 		t = measure()
 		if t == None:
 			return cnt   # 迷路が消えた（他の機体が最後の宝を収穫した）
-		if t != last:
-			pos[own] = lk      # 前の宝は own が集め，そこに残っている
-			cnt += 1
-			last = t
-			lk = (t[0] - x0) * m + t[1] - y0
-			plan = path(pos[idx], lk, tree)
-			own = decide(idx, pos, lk, len(plan), tree)
+		if t != last or first:
+			if not first:
+				pos[own] = lk      # 前の宝は own が集め，そこに残っている
+				cnt += 1
+				last = t
+				lk = (t[0] - x0) * m + t[1] - y0
+			first = False
+			if rows[lk] != None:
+				own = decide_row(pos, rows[lk][0])
+				plan = []
+			else:
+				plan = path(pos[idx], lk, tree)
+				own = decide(idx, pos, lk, len(plan), tree)
 			t_seen = get_tick_count()
 			stuck = 0
 		if own == idx:
-			if len(plan) == 0:
+			cur = pos[idx]
+			if cur == lk:
 				# 宝が足元に出た．すぐ再配置すると，直前に再配置した機体がこの宝を
 				# 見る前に次の宝へ変わり，宝の数と位置の記録が食い違うおそれがある
 				# （use_item の効果が 200 tick の始めに出る場合．シミュレータで発生．
@@ -234,10 +412,16 @@ def collect(idx, m, x0, y0, tree, pos, sub, cnt, last, walked):
 				w = 0
 				while get_tick_count() - t_seen < SAME_CELL_WAIT:
 					w += 1
+			if SHORTCUT and rows[lk] != None:
+				nstep = walk_row(cur, lk, rows[lk], walls, ext, chk, cnt, step, adj, m)
+			else:
+				if len(plan) == 0:
+					plan = path(cur, lk, tree)
+				nstep = len(plan)
+				for d in plan:
+					move(d)
 			if DEBUG:
-				walked[0] += len(plan)
-			for d in plan:
-				move(d)
+				walked[0] += nstep
 			plan = []
 			if cnt >= MAX_TREASURE:
 				harvest()
@@ -249,15 +433,26 @@ def collect(idx, m, x0, y0, tree, pos, sub, cnt, last, walked):
 			if stuck >= 3:
 				harvest()      # 再配置したのに宝が動かない（予備）
 				return cnt
+		elif SHORTCUT:
+			# 待っている間に表を少しずつ作る（ROW_CHUNK マスずつ．宝が動いたらすぐ判断できるように）
+			if bst == None:
+				while nxt < n and rows[nxt] != None:
+					nxt += 1
+				if nxt < n:
+					bst = row_start(nxt, m)
+			if bst != None:
+				if row_steps(bst, adj, ROW_CHUNK):
+					rows[bst[0]] = [bst[1], bst[2]]
+					bst = None
 
 
-def make_partner(idx, m, x0, y0, tree, pos, sub, cnt, last):
+def make_partner(idx, m, x0, y0, tree, adj, pos, sub, cnt, last):
 	def run():
 		p = []
 		for v in pos:
 			p.append(v)        # 念のため自分用に写す
 		wk = [0]
-		collect(idx, m, x0, y0, tree, p, sub, cnt, last, wk)
+		collect(idx, m, x0, y0, tree, adj, p, sub, cnt, last, wk)
 		return wk[0]
 	return run
 
@@ -308,12 +503,12 @@ def leader(bx, by, m, k, total, sub):
 		pos.append(here)
 	hs = []
 	for i in range(1, k):
-		h = spawn_drone(make_partner(i, m, x0, y0, tree, pos, sub, 1, last))
+		h = spawn_drone(make_partner(i, m, x0, y0, tree, adj, pos, sub, 1, last))
 		while h == None:
-			h = spawn_drone(make_partner(i, m, x0, y0, tree, pos, sub, 1, last))
+			h = spawn_drone(make_partner(i, m, x0, y0, tree, adj, pos, sub, 1, last))
 		hs.append(h)
 	wk = [0]
-	c = collect(0, m, x0, y0, tree, pos, sub, 1, last, wk)
+	c = collect(0, m, x0, y0, tree, adj, pos, sub, 1, last, wk)
 	if DEBUG:
 		for h in hs:
 			wk[0] += wait_for(h)

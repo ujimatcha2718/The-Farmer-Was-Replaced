@@ -304,16 +304,40 @@ def spawn_blocks(n, fwd, back, step, stepback, mode, ppos):
 #   機数が total に達したのを合図に全員が行の整列を始める．
 #   行の段階の生成待ちと移動（約 6400 tick）が律速から外れる
 #
+#   終わった列の本数 k は機数から逆算する．配り役が生成に失敗して列の
+#   ドローンが f 機少ないときは k が f 多く出るが，そのぶん生きている列の
+#   ドローンも f 機少ないので，機数は下の式と同じく base + n - 2 を超えない
 #   合図が早すぎないこと：列が k 本（k>=1）終わった時点で行の担当は
 #   多くても k-1 機しか出さない．よって機数は
 #     base + (n-1-k) + (k-1) = base + n - 2 < total = base + n - 1
 #   に留まり，最後の1機を出したときに初めて total に達する．
 #   全列が終わってから出す2機（親に近い行）は待たずに始める
 # ------------------------------------------------------------
-def col_worker(n, x, mode):
+def col_worker(n, d, dm, mode):
 	def run():
-		for i in range(x):
-			move(East)
+		for i in range(d):
+			move(dm)
+		run_block(n, 1, North, South, East, mode)
+	return run
+
+
+# 列の配り方（盤面の端で回り込むことを使う．実機で確認済み）
+#   親は列0．まず「東の配り役」を1機出し，配り役は列1へ動いて列 2..m を
+#   遠い順に生成してから列1を受け持つ．親は西へ回り込んで列 n-1..n-L を
+#   遠い順に生成してから列0を受け持つ．2機が並行して配るので，最後の
+#   ドローンが作業を始めるのは 32x32 で 3600 tick（親1機で配ると 6400）．
+#   これは最短である（tools/cost_models/spawn_tree.py の動的計画法）
+#   配り役が生成に失敗したときは，残りの列（1..d+1）を自分で順に受け持つ
+def col_leader(n, m, mode):
+	def run():
+		move(East)
+		d = m - 1
+		while d > 0:
+			h = spawn_drone(col_worker(n, d, East, mode))
+			if h == None:
+				run_block(n, d + 1, North, South, East, mode)
+				return
+			d -= 1
 		run_block(n, 1, North, South, East, mode)
 	return run
 
@@ -333,13 +357,17 @@ def fast_round(n, mode):
 	base = num_drones()          # 親（と，いれば他のドローン）
 	total = base + n - 1
 
-	# --- 列：遠い列から生成し，親は列0を受け持つ ---
-	x = n - 1
-	while x > 0:
-		h = spawn_drone(col_worker(n, x, mode))
+	# --- 列：東は配り役，西は親が回り込んで遠い列から生成する ---
+	L = (n - 1) // 2             # 親が配る西側の列数
+	h = spawn_drone(col_leader(n, n - 1 - L, mode))
+	if h == None:
+		return False
+	d = L
+	while d > 0:
+		h = spawn_drone(col_worker(n, d, West, mode))
 		if h == None:
 			return False
-		x -= 1
+		d -= 1
 	run_block(n, 1, North, South, East, mode)
 	p = get_pos_y()              # 親は (0,p) にいる．行 p を受け持つ
 

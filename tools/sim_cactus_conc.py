@@ -20,6 +20,9 @@ MAXD = int(sys.argv[4]) if len(sys.argv) > 4 else 32
 import os
 GROW = int(os.environ.get('GROW','400'))
 NOMEAS = os.environ.get('NOMEAS')=='1'
+# 盤面の端で move が反対側へ回り込む（通常の帽子で実機確認済み，200 tick）．WRAP=0 で無効
+# （swap と measure の端での回り込みは不明なので模していない）
+WRAP = os.environ.get('WRAP', '1') == '1'
 # ソース1行あたりの費用（tick）．0 なら数えない．実機の校正値は約 2.37（推定）
 LINE = float(os.environ.get('LINE', '0'))
 
@@ -159,7 +162,10 @@ def _move(dd):
     d = me()
     dx, dy = DXY[dd]
     nx, ny = d.x + dx, d.y + dy
-    if nx < 0 or nx >= W.n or ny < 0 or ny >= W.n:
+    if WRAP:
+        nx %= W.n
+        ny %= W.n
+    elif nx < 0 or nx >= W.n or ny < 0 or ny >= W.n:
         return False
     d.x, d.y = nx, ny
     W.moves += 1
@@ -170,7 +176,7 @@ def move(dd):
     d = me()
     dx, dy = DXY[dd]
     nx, ny = d.x + dx, d.y + dy
-    if nx < 0 or nx >= W.n or ny < 0 or ny >= W.n:
+    if not WRAP and (nx < 0 or nx >= W.n or ny < 0 or ny >= W.n):
         return act(1, lambda: False)
     return act(200, lambda: _move(dd))
 

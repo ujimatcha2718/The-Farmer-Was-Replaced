@@ -33,6 +33,10 @@ TARGET = 200000000   # 「開始時の所持数＋この数」まで集めたら
 WATER_TARGET = 1.0   # 地面の水をこの量まで上げる（溜まっているぶんだけ）
 WATER_PER_PLANT = 2  # 1回植えるときに使う水の上限（タンク）．少しずつ全マスに行き渡らせる
 HELP = True          # 自分の列が済んだら，収穫まで東隣の列を往復して枯れを植え直す（列0の機体は除く）
+FERT_AFTER = 30000   # 周期の始めからこの tick を過ぎても育っていない未完のマスには肥料を使う．
+                     # 肥料を使うとすぐ育ち切るが，そのマスの収穫の半分（1,536個）が奇妙な物質になる
+                     # （fert probe：合体したかぼちゃでも減るのはそのマスの分だけ）．LB では肥料は
+                     # 約8,600 tick に1個しか溜まらないので，周期の終わりに残った遅いマスにだけ使う
 WATER_RESERVE = 32   # 所持がこの数以上のときだけ水を使う．32機が同時に使っても
                      # 足りなくならないので「水が足りない」警告が出ない
 DEBUG = False
@@ -88,6 +92,7 @@ def tend(n, x, goal):
 	cycles = 0
 	while num_items(Items.Pumpkin) < goal:
 		p0 = num_items(Items.Pumpkin)
+		t0 = get_tick_count()
 		# 端にいなければ近い方の端へ（収穫で途中から始め直すとき）
 		if y != 0 and y != n - 1:
 			if y * 2 < n:
@@ -135,6 +140,10 @@ def tend(n, x, goal):
 				if fresh:
 					y = step_to(y, k)
 					if not check_here():
+						if get_entity_type() == Entities.Pumpkin:
+							if get_tick_count() - t0 > FERT_AFTER:
+								if num_items(Items.Fertilizer) >= 1:
+									use_item(Items.Fertilizer)
 						nt.append(k)
 					if num_items(Items.Pumpkin) != p0:
 						fresh = False

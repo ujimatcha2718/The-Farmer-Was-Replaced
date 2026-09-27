@@ -38,6 +38,8 @@ GROW_HI = float(os.environ.get('GROW_HI', '23000'))
 DEATH = float(os.environ.get('DEATH', '0.22'))
 WATER_EVERY = float(os.environ.get('WATER_EVERY', '237'))
 WATER0 = int(os.environ.get('WATER0', '0'))
+FERT_EVERY = float(os.environ.get('FERT_EVERY', '8583'))   # LB で肥料1個／約8,583 tick（実測）
+FERT_TICKS = float(os.environ.get('FERT_TICKS', '100000'))  # 肥料1回で縮む成長時間（実測で使った直後に育ち切った）
 
 North, East, South, West = "N", "E", "S", "W"
 DXY = {North: (0, 1), East: (1, 0), South: (0, -1), West: (-1, 0)}
@@ -103,10 +105,16 @@ def reset():
     W.plants = 0
     W.water_fail = 0
     W.htimes = []
+    W.fert_used = 0
+    W.infected = 0
 
 
 def tanks():
     return WATER0 + int(W.now // WATER_EVERY) - W.water_used
+
+
+def ferts():
+    return int(W.now // FERT_EVERY) - W.fert_used
 
 
 def new_id():
@@ -283,6 +291,8 @@ def num_items(it):
             return float(W.pumpkin)
         if it == Items.Water:
             return float(tanks())
+        if it == Items.Fertilizer:
+            return float(ferts())
         if it == Items.Carrot:
             return float(W.carrot)
         return 0.0
@@ -379,6 +389,7 @@ def plant(e):
         W.seq += 1
         s['uid'] = W.seq
         s['die'] = W.rng.random() < DEATH
+        s['inf'] = False
         # 効果は行動の終わり（200 tick 後）に出るとみなして，そこから成長を数える
         done = d.clock + 200 + W.rng.uniform(GROW_LO, GROW_HI) / (1 + 4 * s['w'])
         s['done'] = done
@@ -395,7 +406,13 @@ def harvest():
             g = W.groups.get(s['gid'])
             x0, y0, sz = g
             base = sz ** 3 if sz <= 5 else sz * sz * 6
-            W.pumpkin += base * 512
+            inf = 0
+            for x in range(x0, x0 + sz):
+                for y in range(y0, y0 + sz):
+                    if W.cell[(x, y)].get('inf'):
+                        inf += 1
+            W.infected += inf
+            W.pumpkin += base * 512 - inf * (base * 512 // (sz * sz)) // 2
             W.harvests += 1
             W.htimes.append(W.now)
             W.sizes[sz] = W.sizes.get(sz, 0) + 1
@@ -425,6 +442,19 @@ def use_item(it, amt=1):
             W.water_used += amt
             s = W.cell[here()]
             s['w'] = min(1.0, s['w'] + 0.25 * amt)
+            return True
+        if it == Items.Fertilizer:
+            s = W.cell[here()]
+            if ferts() < amt:
+                return False
+            W.fert_used += amt
+            if s['e'] == 'p' and not s['ripe']:
+                # 残りの成長時間を縮める（事象の時刻を早めて入れ直す）．感染の印を付ける
+                s['done'] = max(W.now, s['done'] - FERT_TICKS * amt)
+                s['inf'] = True
+                W.seq += 1
+                s['uid'] = W.seq
+                heapq.heappush(W.ev, (s['done'], W.seq, here(), W.seq))
             return True
         return False
     return act(200, f)
@@ -547,9 +577,9 @@ root.clock += root.pending
 root.alive = False
 
 ok_ = W.pumpkin >= GOAL
-print("%-18s seed=%d maxd=%d : かぼちゃ=%d/%d 収穫=%d 大きさ別=%s 植えた=%d 水=%d 水の失敗=%d 実時間=%d  %s"
+print("%-18s seed=%d maxd=%d : かぼちゃ=%d/%d 収穫=%d 大きさ別=%s 植えた=%d 水=%d 水の失敗=%d 肥料=%d 感染マス=%d 実時間=%d  %s"
       % (SRC.split("/")[-1], SEED, MAXD, W.pumpkin, GOAL, W.harvests, dict(sorted(W.sizes.items())),
-         W.plants, W.water_used, W.water_fail, root.clock, "OK" if ok_ else "*** FAIL ***"))
+         W.plants, W.water_used, W.water_fail, W.fert_used, W.infected, root.clock, "OK" if ok_ else "*** FAIL ***"))
 if os.environ.get('CYCLES'):
     # 収穫と収穫の間隔（周期）を8回ずつまとめて出す
     ht = [0.0] + W.htimes

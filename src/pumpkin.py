@@ -26,6 +26,7 @@
 
 TARGET = 200000000   # 「開始時の所持数＋この数」まで集めたら終了
 MIN_SIDE = 6         # 縦にこのマス数だけ同じ ID が続いたら収穫する
+BLOCK = 0            # 0 以外なら，列を BLOCK マスずつの区画に分け，区画の全マスが同じ ID のときだけ収穫する
 WATER_TARGET = 1.0   # 植えるときに地面の水をこの量まで上げる（溜まっているぶんだけ）
 STALE = 60000        # 育ち切ってからこの tick たっても MIN_SIDE にならない塊は，小さくても収穫する
                      # （合体の細かい規則は不明なので，小さな塊が固まって止まらないための保険）
@@ -77,7 +78,18 @@ def tend(n, goal):
 				if ids[y] != m:
 					since[y] = get_tick_count()
 				ids[y] = m
-				if run_of(ids, y, m, n) >= MIN_SIDE or get_tick_count() - since[y] > STALE:
+				go = False
+				if BLOCK > 0:
+					b0 = y - y % BLOCK
+					go = True
+					k = b0
+					while k < b0 + BLOCK:
+						if ids[k] != m:
+							go = False
+						k += 1
+				else:
+					go = run_of(ids, y, m, n) >= MIN_SIDE
+				if go or get_tick_count() - since[y] > STALE:
 					harvest()
 					harvested += 1
 					ids[y] = None

@@ -329,9 +329,13 @@ def can_harvest():
     return act(1, lambda: W.cell[here()]['e'] == 'p' and W.cell[here()]['ripe'])
 
 
-def measure():
+def measure(direction=None):
     def f():
-        s = W.cell[here()]
+        c = here()
+        if direction is not None:
+            dx, dy = DXY[direction]
+            c = ((c[0] + dx) % N, (c[1] + dy) % N)
+        s = W.cell[c]
         if s['e'] != 'p':
             return None
         if s['ripe']:

@@ -5,17 +5,19 @@
 #   ・耕した土に植える（にんじん512個）．成長は一様分布 [約1500, 約23000] tick，水の量 w で 1/(1+4w) 倍
 #   ・育ち切った時点で約22%が枯れる（Entities.Dead_Pumpkin）．上から植え直せる
 #   ・育ち切った生きたかぼちゃが正方形にそろうと合体する．n×n の収穫は 1マスあたり min(n,6)×512 個
-#     （n>=6 ならどの大きさでも1マスあたり 3072 個）．枯れたマスがあると小さな塊にしかならない
-#   ・measure() はかぼちゃの ID を返す（合体したマスは同じ ID）
+#   ・先にできた塊が大きな正方形から一部はみ出していると，その正方形はできない（merge probe2）．
+#     盤面の一部ずつ植え直し続けると小さな塊が固まって大きくならない（シミュレータ）
+#   ・measure() はかぼちゃの ID（合体したマスは同じ ID）
 #   ・水は時間とともに溜まる（LB で1タンク／約237 tick）．1タンクで地面の水 +0.25．植えても減らない
 #
-#  方針
-#   32機がそれぞれ1列を受け持ち，列を往復し続ける．各マスで
-#    ・空き・草・枯れ → （草地なら耕し）水を目標まで入れて植える
-#    ・育ち切ったかぼちゃ → ID を記録し，列の中で同じ ID が MIN_SIDE マス以上続いていれば収穫
-#      （縦に6マス同じ ID なら，そのかぼちゃは 6×6 以上なので，1マスあたりの収穫量は最大）
-#      同じ ID のまま STALE tick たっても大きくならない塊は，小さくても収穫する（保険）
-#   目標額に届いたら全機が止まる
+#  方針：盤面全体を1つのかぼちゃ（32×32，1回 3,145,728 個）にそろえて収穫することを64回くり返す
+#   32機がそれぞれ1列を受け持つ．1回ぶん（1周期）の流れ：
+#    A 列の端から端へ，全マスに（水を入れて）植える
+#    B 逆向きに戻りながら各マスを調べる．枯れていれば植え直す．育ち切っていれば済みにする
+#    C 済みでないマスだけを，端から端へ往復しながら調べ直す（全部済みになるまで）
+#    D 列0の機体は，足元と西隣（回り込みで列31）の ID が同じになったら盤面全体が1つに
+#      まとまったと分かるので収穫する．他の機体は足元が空くのを待つ
+#   収穫されたら（足元が空いたら）次の周期を始める．目標額に届いたら全機が止まる
 #
 #  実行方法（別のコードウィンドウから）:
 #   leaderboard_run(Leaderboards.Pumpkins, "pumpkin", 256)
@@ -25,11 +27,7 @@
 # ============================================================
 
 TARGET = 200000000   # 「開始時の所持数＋この数」まで集めたら終了
-MIN_SIDE = 6         # 縦にこのマス数だけ同じ ID が続いたら収穫する
-BLOCK = 0            # 0 以外なら，列を BLOCK マスずつの区画に分け，区画の全マスが同じ ID のときだけ収穫する
 WATER_TARGET = 1.0   # 植えるときに地面の水をこの量まで上げる（溜まっているぶんだけ）
-STALE = 60000        # 育ち切ってからこの tick たっても MIN_SIDE にならない塊は，小さくても収穫する
-                     # （合体の細かい規則は不明なので，小さな塊が固まって止まらないための保険）
 DEBUG = False
 
 
@@ -46,76 +44,107 @@ def plant_here():
 	plant(Entities.Pumpkin)
 
 
-def run_of(ids, y, m, n):
-	# 列の記録 ids で，y を含み ID が m のマスが縦に何マス続くか
-	r = 1
-	k = y - 1
-	while k >= 0 and ids[k] == m:
-		r += 1
-		k -= 1
-	k = y + 1
-	while k < n and ids[k] == m:
-		r += 1
-		k += 1
-	return r
+def step_to(y, ty):
+	# 列の中で y から ty へ動く（端で回り込まない）．戻り値：新しい y
+	while y < ty:
+		move(North)
+		y += 1
+	while y > ty:
+		move(South)
+		y -= 1
+	return y
 
 
-def tend(n, goal):
-	# 自分の列を往復し続ける（ドローンは列の y=0 にいること）
-	ids = []
-	since = []           # そのマスで今の ID を最初に見た tick
-	for i in range(n):
-		ids.append(None)
-		since.append(0)
+def check_here():
+	# 足元を調べる．育ち切っていれば True．枯れていたり空なら植え直して False
+	e = get_entity_type()
+	if e == Entities.Pumpkin:
+		if can_harvest():
+			return True
+		return False
+	plant_here()
+	return False
+
+
+def reverse(lst):
+	out = []
+	i = len(lst) - 1
+	while i >= 0:
+		out.append(lst[i])
+		i -= 1
+	return out
+
+
+def tend(n, x, goal):
 	y = 0
-	d = North
-	harvested = 0
+	cycles = 0
 	while num_items(Items.Pumpkin) < goal:
-		e = get_entity_type()
-		if e == Entities.Pumpkin:
-			if can_harvest():
+		# --- A：いまいる端から反対の端まで植える ---
+		a = 0
+		b = n - 1
+		dy = 1
+		if y != 0:
+			a = n - 1
+			b = 0
+			dy = -1
+		k = a
+		while True:
+			if get_entity_type() != Entities.Pumpkin:
+				plant_here()
+			if k == b:
+				break
+			k += dy
+			y = step_to(y, k)
+		# --- B：戻りながら調べる（todo は戻る向きの順に並ぶ）---
+		todo = []
+		k = b
+		while True:
+			if not check_here():
+				todo.append(k)
+			if k == a:
+				break
+			k -= dy
+			y = step_to(y, k)
+		# --- C：済みでないマスだけを，いまいる側から往復しながら調べる ---
+		while len(todo) > 0:
+			if num_items(Items.Pumpkin) >= goal:
+				return cycles
+			first = todo[0]
+			last = todo[len(todo) - 1]
+			order = todo
+			if abs(y - last) < abs(y - first):
+				order = reverse(todo)
+			nt = []
+			for k in order:
+				y = step_to(y, k)
+				if not check_here():
+					nt.append(k)
+			todo = nt
+		# --- D：近い方の端へ寄って，収穫を待つ ---
+		if y * 2 < n:
+			y = step_to(y, 0)
+		else:
+			y = step_to(y, n - 1)
+		if x == 0:
+			while get_entity_type() == Entities.Pumpkin:
 				m = measure()
-				if ids[y] != m:
-					since[y] = get_tick_count()
-				ids[y] = m
-				go = False
-				if BLOCK > 0:
-					b0 = y - y % BLOCK
-					go = True
-					k = b0
-					while k < b0 + BLOCK:
-						if ids[k] != m:
-							go = False
-						k += 1
-				else:
-					go = run_of(ids, y, m, n) >= MIN_SIDE
-				if go or get_tick_count() - since[y] > STALE:
+				if m != None and m == measure(West):
 					harvest()
-					harvested += 1
-					ids[y] = None
-					plant_here()
-			else:
-				ids[y] = None
+				if num_items(Items.Pumpkin) >= goal:
+					return cycles
 		else:
-			ids[y] = None
-			plant_here()
-		if y == n - 1:
-			d = South
-		elif y == 0:
-			d = North
-		move(d)
-		if d == North:
-			y += 1
-		else:
-			y -= 1
-	return harvested
+			while get_entity_type() == Entities.Pumpkin:
+				if num_items(Items.Pumpkin) >= goal:
+					return cycles
+		cycles += 1
+	return cycles
 
 
-def worker(dx, dm, n, goal):
+def worker(dx, dm, n, goal, x):
 	def run():
 		for i in range(dx):
 			move(dm)
-		return tend(n, goal)
+		return tend(n, x, goal)
 	return run
 
 
@@ -125,13 +154,10 @@ def leader(n, m, goal):
 	def run():
 		move(East)
 		d = m - 1
-		hs = []
 		while d > 0:
-			h = spawn_drone(worker(d, East, n, goal))
-			if h != None:
-				hs.append(h)
+			spawn_drone(worker(d, East, n, goal, 1 + d))
 			d -= 1
-		return tend(n, goal)
+		return tend(n, 1, goal)
 	return run
 
 
@@ -146,15 +172,15 @@ def main():
 		hs.append(h)
 	d = L
 	while d > 0:
-		h = spawn_drone(worker(d, West, n, goal))
+		h = spawn_drone(worker(d, West, n, goal, n - d))
 		if h != None:
 			hs.append(h)
 		d -= 1
-	c = tend(n, goal)
+	c = tend(n, 0, goal)
 	for h in hs:
 		wait_for(h)
 	if DEBUG:
-		quick_print("parent harvests", c)
+		quick_print("cycles", c)
 	quick_print(get_tick_count())
 
 

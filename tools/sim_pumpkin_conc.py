@@ -235,6 +235,15 @@ def act(cost, fn):
     if PROGRESS:
         _NACT[0] += 1
         if _NACT[0] % PROGRESS == 0:
+            if os.environ.get('DUMP'):
+                for yy in range(N - 1, -1, -1):
+                    row = ''
+                    for xx in range(N):
+                        c = W.cell[(xx, yy)]
+                        row += {None: '.', 'grass': ',', 'dead': 'x'}.get(c['e'], 'O' if c['ripe'] else 'g')
+                    sys.stderr.write(row + '   ' + ' '.join(str(W.cell[(xx, yy)]['gid']) for xx in range(N)) + '\n')
+                sys.stderr.write("groups %s\n" % W.groups)
+                sys.stderr.write("drones %s\n" % [(o.x, o.y) for o in DRONES if o.alive])
             sys.stderr.write("progress acts=%d pumpkin=%d harvests=%d clocks=%s\n" % (
                 _NACT[0], W.pumpkin, W.harvests,
                 sorted(int(o.clock) for o in DRONES if o.alive)[:4]))

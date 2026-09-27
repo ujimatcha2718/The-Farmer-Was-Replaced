@@ -16,8 +16,10 @@
 #    B 逆向きに戻りながら各マスを調べる．枯れていれば植え直す．育ち切っていれば済みにする
 #    C 済みでないマスだけを，端から端へ往復しながら調べ直す（全部済みになるまで）
 #    D 列0の機体は，足元と西隣（回り込みで列31）の ID が同じになったら盤面全体が1つに
-#      まとまったと分かるので収穫する．他の機体は足元が空くのを待つ
-#   収穫されたら（足元が空いたら）次の周期を始める．目標額に届いたら全機が止まる
+#      まとまったと分かるので収穫する．他の機体は収穫を待つ
+#   収穫があったこと（かぼちゃの所持数が増えたこと）を見たら，どの段階にいても次の周期を始める
+#   （B・C の途中で収穫されると，済みにしたマスが空いているのに気づかず止まる．シミュレータで発生）
+#   目標額に届いたら全機が止まる
 #
 #  実行方法（別のコードウィンドウから）:
 #   leaderboard_run(Leaderboards.Pumpkins, "pumpkin", 256)
@@ -76,9 +78,17 @@ def reverse(lst):
 
 
 def tend(n, x, goal):
+	# 収穫があったかどうかは，かぼちゃの所持数が周期の始めより増えたかで知る（全機に見える）
 	y = 0
 	cycles = 0
 	while num_items(Items.Pumpkin) < goal:
+		p0 = num_items(Items.Pumpkin)
+		# 端にいなければ近い方の端へ（収穫で途中から始め直すとき）
+		if y != 0 and y != n - 1:
+			if y * 2 < n:
+				y = step_to(y, 0)
+			else:
+				y = step_to(y, n - 1)
 		# --- A：いまいる端から反対の端まで植える ---
 		a = 0
 		b = n - 1
@@ -98,17 +108,18 @@ def tend(n, x, goal):
 		# --- B：戻りながら調べる（todo は戻る向きの順に並ぶ）---
 		todo = []
 		k = b
-		while True:
+		fresh = True
+		while fresh:
 			if not check_here():
 				todo.append(k)
 			if k == a:
 				break
 			k -= dy
 			y = step_to(y, k)
+			if num_items(Items.Pumpkin) != p0:
+				fresh = False
 		# --- C：済みでないマスだけを，いまいる側から往復しながら調べる ---
-		while len(todo) > 0:
-			if num_items(Items.Pumpkin) >= goal:
-				return cycles
+		while fresh and len(todo) > 0:
 			first = todo[0]
 			last = todo[len(todo) - 1]
 			order = todo
@@ -116,26 +127,24 @@ def tend(n, x, goal):
 				order = reverse(todo)
 			nt = []
 			for k in order:
-				y = step_to(y, k)
-				if not check_here():
-					nt.append(k)
+				if fresh:
+					y = step_to(y, k)
+					if not check_here():
+						nt.append(k)
+					if num_items(Items.Pumpkin) != p0:
+						fresh = False
 			todo = nt
 		# --- D：近い方の端へ寄って，収穫を待つ ---
-		if y * 2 < n:
-			y = step_to(y, 0)
-		else:
-			y = step_to(y, n - 1)
-		if x == 0:
-			while get_entity_type() == Entities.Pumpkin:
+		if fresh:
+			if y * 2 < n:
+				y = step_to(y, 0)
+			else:
+				y = step_to(y, n - 1)
+		while num_items(Items.Pumpkin) == p0:
+			if x == 0:
 				m = measure()
 				if m != None and m == measure(West):
 					harvest()
-				if num_items(Items.Pumpkin) >= goal:
-					return cycles
-		else:
-			while get_entity_type() == Entities.Pumpkin:
-				if num_items(Items.Pumpkin) >= goal:
-					return cycles
 		cycles += 1
 	return cycles
 

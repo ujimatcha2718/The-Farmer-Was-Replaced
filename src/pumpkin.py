@@ -29,7 +29,10 @@
 # ============================================================
 
 TARGET = 200000000   # 「開始時の所持数＋この数」まで集めたら終了
-WATER_TARGET = 1.0   # 植えるときに地面の水をこの量まで上げる（溜まっているぶんだけ）
+WATER_TARGET = 1.0   # 地面の水をこの量まで上げる（溜まっているぶんだけ）
+WATER_PER_PLANT = 1  # 1回植えるときに使う水の上限（タンク）．少しずつ全マスに行き渡らせる
+WATER_RESERVE = 32   # 所持がこの数以上のときだけ水を使う．32機が同時に使っても
+                     # 足りなくならないので「水が足りない」警告が出ない
 DEBUG = False
 
 
@@ -37,9 +40,9 @@ def plant_here():
 	if get_ground_type() != Grounds.Soil:
 		till()
 	k = 0
-	while k < 4 and get_water() < WATER_TARGET - 0.1:
-		if num_items(Items.Water) < 1:
-			k = 4
+	while k < WATER_PER_PLANT and get_water() < WATER_TARGET - 0.1:
+		if num_items(Items.Water) < WATER_RESERVE:
+			k = WATER_PER_PLANT
 		else:
 			use_item(Items.Water)
 			k += 1

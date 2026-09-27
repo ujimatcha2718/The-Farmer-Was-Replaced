@@ -101,6 +101,8 @@ def reset():
     W.harvests = 0
     W.sizes = {}
     W.plants = 0
+    W.water_fail = 0
+    W.htimes = []
 
 
 def tanks():
@@ -395,6 +397,7 @@ def harvest():
             base = sz ** 3 if sz <= 5 else sz * sz * 6
             W.pumpkin += base * 512
             W.harvests += 1
+            W.htimes.append(W.now)
             W.sizes[sz] = W.sizes.get(sz, 0) + 1
             del W.groups[s['gid']]
             for x in range(x0, x0 + sz):
@@ -417,6 +420,7 @@ def use_item(it, amt=1):
     def f():
         if it == Items.Water:
             if tanks() < amt:
+                W.water_fail += 1
                 return False
             W.water_used += amt
             s = W.cell[here()]
@@ -543,9 +547,16 @@ root.clock += root.pending
 root.alive = False
 
 ok_ = W.pumpkin >= GOAL
-print("%-18s seed=%d maxd=%d : かぼちゃ=%d/%d 収穫=%d 大きさ別=%s 植えた=%d 水=%d 実時間=%d  %s"
+print("%-18s seed=%d maxd=%d : かぼちゃ=%d/%d 収穫=%d 大きさ別=%s 植えた=%d 水=%d 水の失敗=%d 実時間=%d  %s"
       % (SRC.split("/")[-1], SEED, MAXD, W.pumpkin, GOAL, W.harvests, dict(sorted(W.sizes.items())),
-         W.plants, W.water_used, root.clock, "OK" if ok_ else "*** FAIL ***"))
+         W.plants, W.water_used, W.water_fail, root.clock, "OK" if ok_ else "*** FAIL ***"))
+if os.environ.get('CYCLES'):
+    # 収穫と収穫の間隔（周期）を8回ずつまとめて出す
+    ht = [0.0] + W.htimes
+    gaps = [ht[i + 1] - ht[i] for i in range(len(ht) - 1)]
+    for i in range(0, len(gaps), 8):
+        g = gaps[i:i + 8]
+        print("  周期 %2d-%2d 平均 %6.0f 最大 %6.0f" % (i + 1, i + len(g), sum(g) / len(g), max(g)))
 if PROFILE:
     for k, v in sorted(PROF.items(), key=lambda kv: -kv[1]):
         print("  行数 %-14s %d" % (k, v))

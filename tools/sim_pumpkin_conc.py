@@ -15,7 +15,7 @@
   ・盤面の端で move は回り込む
 
 引数: src seed [maxdrones] [NAME=value ...]
-環境変数: N（既定32） LINE（1行の費用．既定2.37） GOAL（合否の額．既定200000000） MAXMERGE（既定12）
+環境変数: N（既定32） LINE（1行の費用．既定2.37） GOAL（合否の額．既定200000000） MAXMERGE（既定32）
           GROW_LO GROW_HI DEATH WATER_EVERY WATER0（最初の水タンク） PROGRESS PROFILE
 """
 import ast
@@ -32,7 +32,7 @@ MAXD = int(sys.argv[3]) if len(sys.argv) > 3 else 32
 N = int(os.environ.get('N', '32'))
 LINE = float(os.environ.get('LINE', '2.37'))
 GOAL = int(os.environ.get('GOAL', '200000000'))
-MAXMERGE = int(os.environ.get('MAXMERGE', '12'))
+MAXMERGE = int(os.environ.get('MAXMERGE', '32'))
 GROW_LO = float(os.environ.get('GROW_LO', '1500'))
 GROW_HI = float(os.environ.get('GROW_HI', '23000'))
 DEATH = float(os.environ.get('DEATH', '0.22'))
@@ -140,46 +140,52 @@ def ok(x, y):
 
 
 def try_merge(c):
+    """c が育ち切ったとき：c を含み，中が全部「育ち切った生きたかぼちゃ」で，中にかかる塊が全部
+    中に収まる正方形のうち最大のもの（一辺 MAXMERGE まで，2つ以上の塊を含むもの）を1つの塊にする"""
     cx, cy = c
     M = min(MAXMERGE, N)
-    # c のまわりの窓で「育ち切った生きたかぼちゃ」の2次元累積和を作り，正方形が全部そうかを O(1) で調べる
-    xa, ya = max(0, cx - M + 1), max(0, cy - M + 1)
-    xb, yb = min(N, cx + M), min(N, cy + M)
-    w, h = xb - xa, yb - ya
-    P = [[0] * (h + 1) for _ in range(w + 1)]
-    for i in range(w):
-        row = 0
-        for j in range(h):
-            row += 1 if ok(xa + i, ya + j) else 0
-            P[i + 1][j + 1] = P[i][j + 1] + row
-    def full(x0, y0, sz):
-        i0, j0 = x0 - xa, y0 - ya
-        return P[i0 + sz][j0 + sz] - P[i0][j0 + sz] - P[i0 + sz][j0] + P[i0][j0] == sz * sz
-    for size in range(M, 1, -1):
-        for x0 in range(max(xa, cx - size + 1), min(cx, xb - size) + 1):
-            for y0 in range(max(ya, cy - size + 1), min(cy, yb - size) + 1):
-                if not full(x0, y0, size):
-                    continue
-                gids = set()
-                for x in range(x0, x0 + size):
-                    for y in range(y0, y0 + size):
-                        gids.add(W.cell[(x, y)]['gid'])
-                good = True
-                for g in gids:
-                    gx, gy, gs = W.groups[g]
-                    if gx < x0 or gy < y0 or gx + gs > x0 + size or gy + gs > y0 + size:
-                        good = False
-                        break
-                if not good or len(gids) == 1:
-                    continue
-                nid = new_id()
-                for g in gids:
-                    del W.groups[g]
-                W.groups[nid] = [x0, y0, size]
-                for x in range(x0, x0 + size):
-                    for y in range(y0, y0 + size):
-                        W.cell[(x, y)]['gid'] = nid
-                return
+    # dp[i][j]：(i,j) を右上（x,y が最大の角）とする全部 ok の正方形の最大の一辺
+    dp = [[0] * N for _ in range(N)]
+    for i in range(N):
+        for j in range(N):
+            if ok(i, j):
+                if i == 0 or j == 0:
+                    dp[i][j] = 1
+                else:
+                    a1 = dp[i - 1][j]; a2 = dp[i][j - 1]; a3 = dp[i - 1][j - 1]
+                    m = a1 if a1 < a2 else a2
+                    m = m if m < a3 else a3
+                    dp[i][j] = m + 1
+    cands = []
+    for i in range(cx, min(N, cx + M)):
+        for j in range(cy, min(N, cy + M)):
+            need = max(i - cx, j - cy) + 1
+            top = min(dp[i][j], M)
+            for sz in range(top, max(need, 2) - 1, -1):
+                cands.append((sz, i - sz + 1, j - sz + 1))
+    cands.sort(reverse=True)
+    groups = list(W.groups.items())
+    for sz, x0, y0 in cands:
+        inside = []
+        good = True
+        for g, (gx, gy, gs) in groups:
+            # 交わるか
+            if gx + gs <= x0 or gx >= x0 + sz or gy + gs <= y0 or gy >= y0 + sz:
+                continue
+            if gx < x0 or gy < y0 or gx + gs > x0 + sz or gy + gs > y0 + sz:
+                good = False
+                break
+            inside.append(g)
+        if not good or len(inside) < 2:
+            continue
+        nid = new_id()
+        for g in inside:
+            del W.groups[g]
+        W.groups[nid] = [x0, y0, sz]
+        for x in range(x0, x0 + sz):
+            for y in range(y0, y0 + sz):
+                W.cell[(x, y)]['gid'] = nid
+        return
 
 
 def me():

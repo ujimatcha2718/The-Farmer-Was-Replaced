@@ -14,6 +14,7 @@
 #    ・空き・草・枯れ → （草地なら耕し）水を目標まで入れて植える
 #    ・育ち切ったかぼちゃ → ID を記録し，列の中で同じ ID が MIN_SIDE マス以上続いていれば収穫
 #      （縦に6マス同じ ID なら，そのかぼちゃは 6×6 以上なので，1マスあたりの収穫量は最大）
+#      同じ ID のまま STALE tick たっても大きくならない塊は，小さくても収穫する（保険）
 #   目標額に届いたら全機が止まる
 #
 #  実行方法（別のコードウィンドウから）:
@@ -26,6 +27,8 @@
 TARGET = 200000000   # 「開始時の所持数＋この数」まで集めたら終了
 MIN_SIDE = 6         # 縦にこのマス数だけ同じ ID が続いたら収穫する
 WATER_TARGET = 1.0   # 植えるときに地面の水をこの量まで上げる（溜まっているぶんだけ）
+STALE = 60000        # 育ち切ってからこの tick たっても MIN_SIDE にならない塊は，小さくても収穫する
+                     # （合体の細かい規則は不明なので，小さな塊が固まって止まらないための保険）
 DEBUG = False
 
 
@@ -59,8 +62,10 @@ def run_of(ids, y, m, n):
 def tend(n, goal):
 	# 自分の列を往復し続ける（ドローンは列の y=0 にいること）
 	ids = []
+	since = []           # そのマスで今の ID を最初に見た tick
 	for i in range(n):
 		ids.append(None)
+		since.append(0)
 	y = 0
 	d = North
 	harvested = 0
@@ -69,8 +74,10 @@ def tend(n, goal):
 		if e == Entities.Pumpkin:
 			if can_harvest():
 				m = measure()
+				if ids[y] != m:
+					since[y] = get_tick_count()
 				ids[y] = m
-				if run_of(ids, y, m, n) >= MIN_SIDE:
+				if run_of(ids, y, m, n) >= MIN_SIDE or get_tick_count() - since[y] > STALE:
 					harvest()
 					harvested += 1
 					ids[y] = None

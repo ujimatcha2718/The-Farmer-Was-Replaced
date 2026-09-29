@@ -26,16 +26,18 @@ POW_LOW = 30          # 1機あたりの Power がこれを下回ったらひま
 WATER_KEEP = 4        # 水はこの数より多く持っているときだけ使う
 
 SEQ = [
-	Unlocks.Speed, Unlocks.Expand, Unlocks.Plant, Unlocks.Expand, Unlocks.Carrots, Unlocks.Speed,
-	Unlocks.Trees, Unlocks.Speed, Unlocks.Expand, Unlocks.Expand, Unlocks.Watering, Unlocks.Speed,
-	Unlocks.Grass, Unlocks.Grass, Unlocks.Trees, Unlocks.Carrots, Unlocks.Speed, Unlocks.Sunflowers,
-	Unlocks.Pumpkins, Unlocks.Expand, Unlocks.Trees, Unlocks.Carrots, Unlocks.Pumpkins, Unlocks.Watering,
-	Unlocks.Grass, Unlocks.Expand, Unlocks.Cactus, Unlocks.Fertilizer, Unlocks.Hats, Unlocks.Mazes,
-	Unlocks.Megafarm, Unlocks.Megafarm, Unlocks.Megafarm, Unlocks.Pumpkins, Unlocks.Carrots, Unlocks.Trees,
-	Unlocks.Expand, Unlocks.Cactus, Unlocks.Megafarm, Unlocks.Mazes, Unlocks.Mazes, Unlocks.Dinosaurs,
-	Unlocks.Dinosaurs, Unlocks.Dinosaurs, Unlocks.Mazes, Unlocks.Dinosaurs, Unlocks.Mazes,
-	Unlocks.Dinosaurs, Unlocks.Leaderboard
+	Unlocks.Speed, Unlocks.Expand, Unlocks.Plant, Unlocks.Expand, Unlocks.Speed, Unlocks.Carrots,
+	Unlocks.Expand, Unlocks.Trees, Unlocks.Expand, Unlocks.Watering, Unlocks.Speed, Unlocks.Grass,
+	Unlocks.Grass, Unlocks.Trees, Unlocks.Carrots, Unlocks.Sunflowers, Unlocks.Carrots, Unlocks.Speed,
+	Unlocks.Speed, Unlocks.Hats, Unlocks.Pumpkins, Unlocks.Trees, Unlocks.Grass, Unlocks.Expand,
+	Unlocks.Pumpkins, Unlocks.Watering, Unlocks.Expand, Unlocks.Cactus, Unlocks.Fertilizer,
+	Unlocks.Mazes, Unlocks.Mazes, Unlocks.Mazes, Unlocks.Megafarm, Unlocks.Megafarm, Unlocks.Megafarm,
+	Unlocks.Pumpkins, Unlocks.Carrots, Unlocks.Trees, Unlocks.Expand, Unlocks.Cactus, Unlocks.Mazes,
+	Unlocks.Megafarm, Unlocks.Dinosaurs, Unlocks.Dinosaurs, Unlocks.Dinosaurs, Unlocks.Dinosaurs,
+	Unlocks.Mazes, Unlocks.Dinosaurs, Unlocks.Leaderboard
 ]
+START = 0             # SEQ のこの番号から始める（試験用．通常は 0）
+STOP = 999            # SEQ のこの番号の手前で止める（試験用）
 
 DIRS = [North, East, South, West]
 DXS = [0, 1, 0, -1]
@@ -142,7 +144,7 @@ def job_wood(wat):
 		if not can_harvest():
 			return
 		harvest()
-	elif e != None and e != Entities.Grass:
+	elif e != None:
 		harvest()
 	if (get_pos_x() + get_pos_y()) % 2 == 0 and num_unlocked(Unlocks.Trees) > 0:
 		plant(Entities.Tree)
@@ -416,6 +418,10 @@ def power_round():
 	n = get_world_size()
 	if n * n < 12:
 		return
+	sc = get_cost(Entities.Sunflower)
+	for it in sc:
+		if num_items(it) < n * n * sc[it] * 2:
+			return
 	if num_items(Items.Carrot) < n * n * 2:
 		return
 	goto(0, 0)
@@ -454,8 +460,8 @@ def maybe_power():
 # ------------------------------------------------------------
 # 金：盤面いっぱいの迷路．1機で全探索して木を覚え，宝を再配置しながら取る
 # ------------------------------------------------------------
-def explore(n):
-	# 今いるマスから DFS．par_[セル] ＝ 親セル，pd[セル] ＝ 親から来た向き，dep ＝ 深さ
+def explore(n, x0, y0, b):
+	# 今いるマスから DFS（迷路は x0..x0+b-1, y0..y0+b-1）．pa ＝ 親セル，pd ＝ 親から来た向き，dep ＝ 深さ
 	start = get_pos_x() * n + get_pos_y()
 	pa = {}
 	pd = {}
@@ -479,7 +485,7 @@ def explore(n):
 			cy = cur % n
 			tx = cx + DXS[k]
 			ty = cy + DYS[k]
-			if tx >= 0 and ty >= 0 and tx < n and ty < n:
+			if tx >= x0 and ty >= y0 and tx < x0 + b and ty < y0 + b:
 				t = tx * n + ty
 				if not (t in pa):
 					if mv(DIRS[k]):
@@ -518,83 +524,260 @@ def walk_tree(tr, frm, to):
 		i -= 1
 
 
-def farm_gold(target):
-	n = get_world_size()
-	amt = n * mul(Unlocks.Mazes)
-	while num_items(Items.Gold) < target:
-		gain = n * n * mul(Unlocks.Mazes)
-		want = (target - num_items(Items.Gold)) // gain + 2
-		if want > 301:
-			want = 301
-		need(Items.Weird_Substance, amt * want)
-		clear()
-		goto(n // 2, n // 2)
-		plant(Entities.Bush)
-		use_item(Items.Weird_Substance, amt)
-		tr = explore(n)
-		reuse = 0
-		going = True
-		while going:
-			t = measure()
-			if t == None:
-				going = False
-			else:
-				tx, ty = t
-				walk_tree(tr, get_pos_x() * n + get_pos_y(), tx * n + ty)
-				if num_items(Items.Gold) + gain < target and reuse < 299 and num_items(Items.Weird_Substance) >= amt:
-					if use_item(Items.Weird_Substance, amt):
-						reuse += 1
+def maze_block(x0, y0, b, target, want):
+	# 盤面の b×b の区画 (x0,y0) に迷路を作り，金が target に届くまで宝を取る．物質が尽きたら止まる
+	# 迷路ができると外から通れないので，全機が自分の区画の中心に着くまで待ってから作る：
+	# 機数が want に達する（全機を生成し終える）まで待ち，さらに盤面を1周する時間だけ till で待つ
+	def run():
+		n = get_world_size()
+		amt = b * mul(Unlocks.Mazes)
+		cx = x0 + b // 2
+		cy = y0 + b // 2
+		goto(cx, cy)
+		k = 0
+		while num_drones() < want and k < 3000:
+			k += 1
+		for i in range(2 * (n // 2 + 1)):
+			till()
+		while num_items(Items.Gold) < target and num_items(Items.Weird_Substance) >= amt:
+			goto(cx, cy)
+			if get_entity_type() != None:
+				harvest()
+			if get_ground_type() == Grounds.Soil:
+				till()
+			plant(Entities.Bush)
+			if not use_item(Items.Weird_Substance, amt):
+				return 0
+			tr = explore(n, x0, y0, b)
+			reuse = 0
+			going = True
+			while going:
+				t = measure()
+				if t == None:
+					going = False
+				else:
+					tx, ty = t
+					walk_tree(tr, get_pos_x() * n + get_pos_y(), tx * n + ty)
+					if num_items(Items.Gold) < target and reuse < 299 and num_items(Items.Weird_Substance) >= amt:
+						if use_item(Items.Weird_Substance, amt):
+							reuse += 1
+						else:
+							harvest()
+							going = False
 					else:
 						harvest()
 						going = False
-				else:
-					harvest()
-					going = False
+		return 0
+	return run
+
+
+def farm_gold(target):
+	if DEBUG:
+		quick_print("gold start", num_items(Items.Gold), target)
+	n = get_world_size()
+	D = max_drones()
+	# 区画の一辺 b：区画の数 (n//b)² が機数を超えない最小の b（3 以上）
+	b = 3
+	while (n // b) * (n // b) > D:
+		b += 1
+	if b > n:
+		b = n
+	k = n // b
+	while num_items(Items.Gold) < target:
+		short = target - num_items(Items.Gold)
+		gain = b * b * mul(Unlocks.Mazes)
+		sub = (short // gain + 2 * k * k) * b * mul(Unlocks.Mazes)
+		need(Items.Weird_Substance, sub)
+		clear()
+		goto(0, 0)
+		hs = []
+		for i in range(k):
+			for j in range(k):
+				if i + j > 0:
+					h = spawn_drone(maze_block(i * b, j * b, b, target, k * k))
+					if h != None:
+						hs.append(h)
+		maze_block(0, 0, b, target, k * k)()
+		for h in hs:
+			wait_for(h)
 
 
 # ------------------------------------------------------------
 # 骨：恐竜で (0,0) から折り返しの閉路を回り，尾を伸ばす
 # ------------------------------------------------------------
+def ordv(x, y, n):
+	# 折り返し閉路（行0を東へ，行1..n-1 を折り返し，列0を南へ戻る）の上の順番
+	if y == 0:
+		return x
+	if x == 0:
+		return n * n - y
+	b = n + (y - 1) * (n - 1)
+	if y % 2 == 1:
+		return b + n - 1 - x
+	return b + x - 1
+
+
+def cyc_dir(x, y, rowe, n):
+	if x == 0 and y > 0:
+		return South
+	if rowe:
+		if x < n - 1:
+			return East
+		return North
+	if x > 1:
+		return West
+	if y < n - 1:
+		return North
+	return West
+
+
+def snake_run(n, c0, cost, L):
+	# src/snake.py の走り方（前半は北への近道，中間で閉路に戻し，後半は周回）．尾が L に届いたら止まる
+	N = n * n
+	nm1 = n - 1
+	n2m1 = 2 * n - 1
+	cut = N // 2
+	if cut > 240:
+		cut = 240
+	x = 0
+	y = 0
+	rowe = True
+	h = 0
+	a = 0
+	q = {}
+	q[0] = 0
+	qh = 1
+	qt = 0
+	known = False
+	cc = num_items(Items.Cactus)
+	m = measure()
+	if m != None:
+		ax, ay = m
+		a = ordv(ax, ay, n)
+		known = True
+	steps = 0
+	while qh - qt <= cut:
+		t = q[qt]
+		d_tail = (t - h) % N
+		if d_tail == 0:
+			d_tail = N
+		if x == 0 and y > 0:
+			d = South
+		elif rowe:
+			if x < nm1:
+				d = East
+			else:
+				d = North
+		elif x > 1:
+			d = West
+		elif y < nm1:
+			d = North
+		else:
+			d = West
+		dc = 1
+		if known and y < nm1 and x > 0:
+			if rowe:
+				jump = n2m1 - 2 * x
+			else:
+				jump = 2 * x - 1
+			if jump > 1 and jump + 2 < d_tail and jump <= (a - h) % N:
+				d = North
+				dc = jump
+		if not move(d):
+			return
+		if d == East:
+			x += 1
+		elif d == West:
+			x -= 1
+		elif d == North:
+			y += 1
+			rowe = not rowe
+		else:
+			y -= 1
+			rowe = not rowe
+		h = (h + dc) % N
+		q[qh] = h
+		qh += 1
+		# リンゴを食べると次のリンゴが出てサボテンが減る．それで食べたかを知る（食べた1歩は尾が縮まない）
+		c2 = num_items(Items.Cactus)
+		if c2 < cc:
+			cc = c2
+			m = measure()
+			if m != None:
+				ax, ay = m
+				a = ordv(ax, ay, n)
+				known = True
+			if (c0 - c2) // cost - 1 >= L:
+				return
+		else:
+			q.pop(qt)
+			qt += 1
+		steps += 1
+	# 中間：経路どおりに (0,0) へ戻す
+	need2 = 2 * (qh - qt)
+	steps = 0
+	while steps < need2 or x != 0 or y != 0:
+		d = cyc_dir(x, y, rowe, n)
+		if not move(d):
+			return
+		if d == North:
+			y += 1
+			rowe = not rowe
+		elif d == East:
+			x += 1
+		elif d == West:
+			x -= 1
+		else:
+			y -= 1
+			rowe = not rowe
+		steps += 1
+		if steps > 3 * N:
+			return
+		if steps % 16 == 0:
+			if (c0 - num_items(Items.Cactus)) // cost - 1 >= L:
+				return
+	# 後半：1周ずつ回る．1行ごとに尾の長さを確かめる
+	while True:
+		for i in range(n - 1):
+			move(East)
+		d = West
+		for k in range(n - 1):
+			if not move(North):
+				return
+			for i in range(n - 2):
+				move(d)
+			if d == West:
+				d = East
+			else:
+				d = West
+			if (c0 - num_items(Items.Cactus)) // cost - 1 >= L or num_items(Items.Cactus) < cost:
+				return
+		move(West)
+		for i in range(n - 1):
+			move(South)
+
+
 def farm_bones(target):
+	if DEBUG:
+		quick_print("bones start", num_items(Items.Bone), target)
 	n = get_world_size()
 	m = mul(Unlocks.Dinosaurs)
 	cost = 2 * m
 	while num_items(Items.Bone) < target:
 		short = target - num_items(Items.Bone)
 		L = 1
-		while L * L * m < short and L < n * n - 1:
+		while L * L * m < short and L < n * n - 2:
 			L += 1
 		need(Items.Cactus, (L + 2) * cost)
+		maybe_power()
 		clear()
 		goto(0, 0)
 		c0 = num_items(Items.Cactus)
 		change_hat(Hats.Dinosaur_Hat)
-		eaten = 0
-		going = True
-		while going:
-			# 1周：行0を東へ，行1..n-1 を折り返し，(1,n-1) から列0を南へ．進めなければ終わる
-			for i in range(n - 1):
-				move(East)
-			d = West
-			k = 0
-			while k < n - 1 and going:
-				if not move(North):
-					going = False
-				for i in range(n - 2):
-					move(d)
-				if d == West:
-					d = East
-				else:
-					d = West
-				eaten = (c0 - num_items(Items.Cactus)) // cost - 1
-				if eaten >= L or num_items(Items.Cactus) < cost:
-					going = False
-				k += 1
-			if going:
-				move(West)
-				for i in range(n - 1):
-					move(South)
+		snake_run(n, c0, cost, L)
 		change_hat(Hats.Straw_Hat)
+		if DEBUG:
+			quick_print("bones run", L, num_items(Items.Bone))
 		clear()
 
 
@@ -683,8 +866,9 @@ def buy(u):
 
 
 def main():
-	k = 0
-	for u in SEQ:
+	k = START
+	while k < len(SEQ) and k < STOP:
+		u = SEQ[k]
 		buy(u)
 		if DEBUG:
 			quick_print(k, u, num_unlocked(u), get_world_size(), max_drones())

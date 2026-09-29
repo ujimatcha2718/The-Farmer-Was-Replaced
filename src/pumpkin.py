@@ -39,7 +39,7 @@ FERT_AFTER = 30000   # 周期の始めからこの tick を過ぎても育って
                      # 約8,600 tick に1個しか溜まらないので，周期の終わりに残った遅いマスにだけ使う
 WATER_RESERVE = 32   # 所持がこの数以上のときだけ水を使う．32機が同時に使っても
                      # 足りなくならないので「水が足りない」警告が出ない
-DEBUG = False
+DEBUG = True
 
 
 def plant_here():
@@ -205,6 +205,7 @@ def main():
 	clear()
 	n = get_world_size()
 	goal = num_items(Items.Pumpkin) + TARGET
+	w0 = num_items(Items.Weird_Substance)
 	L = (n - 1) // 2
 	hs = []
 	h = spawn_drone(leader(n, n - 1 - L, goal))
@@ -221,6 +222,8 @@ def main():
 		wait_for(h)
 	if DEBUG:
 		quick_print("cycles", c)
+		# 感染マスの数（奇妙な物質は感染マス1つにつき 1,536 増える）
+		quick_print("infected", (num_items(Items.Weird_Substance) - w0) / 1536)
 	quick_print(get_tick_count())
 
 

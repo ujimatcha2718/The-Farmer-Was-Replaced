@@ -50,6 +50,7 @@ class Items:
     Water = "Water"
     Carrot = "Carrot"
     Fertilizer = "Fertilizer"
+    Weird_Substance = "Weird_Substance"
 
 
 class Entities:
@@ -107,6 +108,7 @@ def reset():
     W.htimes = []
     W.fert_used = 0
     W.infected = 0
+    W.weird = 0
 
 
 def tanks():
@@ -295,6 +297,8 @@ def num_items(it):
             return float(ferts())
         if it == Items.Carrot:
             return float(W.carrot)
+        if it == Items.Weird_Substance:
+            return float(W.weird)
         return 0.0
     return act(1, f)
 
@@ -412,6 +416,7 @@ def harvest():
                     if W.cell[(x, y)].get('inf'):
                         inf += 1
             W.infected += inf
+            W.weird += inf * (base * 512 // (sz * sz)) // 2
             W.pumpkin += base * 512 - inf * (base * 512 // (sz * sz)) // 2
             W.harvests += 1
             W.htimes.append(W.now)

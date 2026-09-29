@@ -37,6 +37,7 @@ FERT_AFTER = 30000   # 周期の始めからこの tick を過ぎても育って
                      # 肥料を使うとすぐ育ち切るが，そのマスの収穫の半分（1,536個）が奇妙な物質になる
                      # （fert probe：合体したかぼちゃでも減るのはそのマスの分だけ）．LB では肥料は
                      # 約8,600 tick に1個しか溜まらないので，周期の終わりに残った遅いマスにだけ使う
+FERT_RESERVE = 1     # 所持がこの数以上のときだけ肥料を使う（同時に使って足りなくなる警告を減らす）
 WATER_RESERVE = 32   # 所持がこの数以上のときだけ水を使う．32機が同時に使っても
                      # 足りなくならないので「水が足りない」警告が出ない
 DEBUG = True
@@ -142,7 +143,7 @@ def tend(n, x, goal):
 					if not check_here():
 						if get_entity_type() == Entities.Pumpkin:
 							if get_tick_count() - t0 > FERT_AFTER:
-								if num_items(Items.Fertilizer) >= 1:
+								if num_items(Items.Fertilizer) >= FERT_RESERVE:
 									use_item(Items.Fertilizer)
 						nt.append(k)
 					if num_items(Items.Pumpkin) != p0:

@@ -105,6 +105,7 @@ def reset():
     W.sizes = {}
     W.plants = 0
     W.water_fail = 0
+    W.fert_fail = 0
     W.htimes = []
     W.fert_used = 0
     W.infected = 0
@@ -451,6 +452,7 @@ def use_item(it, amt=1):
         if it == Items.Fertilizer:
             s = W.cell[here()]
             if ferts() < amt:
+                W.fert_fail += 1
                 return False
             W.fert_used += amt
             if s['e'] == 'p' and not s['ripe']:
@@ -582,9 +584,9 @@ root.clock += root.pending
 root.alive = False
 
 ok_ = W.pumpkin >= GOAL
-print("%-18s seed=%d maxd=%d : かぼちゃ=%d/%d 収穫=%d 大きさ別=%s 植えた=%d 水=%d 水の失敗=%d 肥料=%d 感染マス=%d 実時間=%d  %s"
+print("%-18s seed=%d maxd=%d : かぼちゃ=%d/%d 収穫=%d 大きさ別=%s 植えた=%d 水=%d 水の失敗=%d 肥料=%d 肥料の失敗=%d 感染マス=%d 実時間=%d  %s"
       % (SRC.split("/")[-1], SEED, MAXD, W.pumpkin, GOAL, W.harvests, dict(sorted(W.sizes.items())),
-         W.plants, W.water_used, W.water_fail, W.fert_used, W.infected, root.clock, "OK" if ok_ else "*** FAIL ***"))
+         W.plants, W.water_used, W.water_fail, W.fert_used, W.fert_fail, W.infected, root.clock, "OK" if ok_ else "*** FAIL ***"))
 if os.environ.get('CYCLES'):
     # 収穫と収穫の間隔（周期）を8回ずつまとめて出す
     ht = [0.0] + W.htimes

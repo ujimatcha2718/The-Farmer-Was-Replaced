@@ -355,6 +355,13 @@ experiments/    採用しなかった版
 - 成功条件：`num_unlocked(Unlocks.Leaderboard) > 0`．
 - 不明：アンロックの一覧と各段階の費用，前提条件，何で計測するか（tick か）．wiki はこの環境から開けない → ゲーム内で調べる．
 - wiki の調査は別セッションでも失敗した（wiki.gg・fandom・github.io・Steam・archive などすべて 403．ドメインを許可しても通らなかった）．検索要約だけの結果は `docs/fastest_reset_wiki.md`（Leaderboard の費用は骨 2,000 という要約があるが**未確認**）．→ `probes/reset_cost_probe.py` で全アンロックの段階と費用をゲームから出す．
+- **その後，別セッションで wiki と lab を読めた**（`?action=raw` で取得）．結果は `docs/fastest_reset_wiki.md`：
+  - **Leaderboard の費用は 骨 2,000,000 ＋ 金 1,000,000**．ほかのアンロックはずっと安い（lab の32手の経路で 木 約6.8万，かぼちゃ 2.5万など）．
+  - アンロックは `unlock(Unlocks.X)` を呼ぶ（成功 200 tick，失敗 1 tick）．
+  - 記録は秒（推定）．Speed の段階と Power で1秒あたりの tick が変わる（Speed 0・Power なしで 400 tick／秒，Speed 5・Power ありで 6,075）．成長時間は秒で決まり，実測の tick（サボテン 5,877，かぼちゃ平均 12,052）と Speed 5・Power ありの換算がよく合う．
+  - 骨は尾の長さ² ×（段階の倍率），金は迷路の面積×（段階の倍率）．盤面が広いほど骨が集めやすい（推定）．
+- **ゲーム内の費用（reset_cost_probe の最初の版，出力の最後の部分だけ）**：Watering 50,200,800,3200,12800,51200,205000,819000,3280000（木），Utilities かぼちゃ 1000，Variables にんじん 35 で wiki の表と一致．最大段階を超えると `get_cost(u, k)` は `{}` を返す（None ではない）．
+- 次：`probes/reset_cost_probe.py`（1アンロック1行に直した版）と `probes/reset_levels_probe.py`（simulate で段階を変え，盤面の大きさ・機数・植える費用を出す．子は reset_state_child.py）を実行してもらう．
 
 ---
 

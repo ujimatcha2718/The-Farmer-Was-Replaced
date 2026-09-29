@@ -361,7 +361,9 @@ experiments/    採用しなかった版
   - 記録は秒（推定）．Speed の段階と Power で1秒あたりの tick が変わる（Speed 0・Power なしで 400 tick／秒，Speed 5・Power ありで 6,075）．成長時間は秒で決まり，実測の tick（サボテン 5,877，かぼちゃ平均 12,052）と Speed 5・Power ありの換算がよく合う．
   - 骨は尾の長さ² ×（段階の倍率），金は迷路の面積×（段階の倍率）．盤面が広いほど骨が集めやすい（推定）．
 - **ゲーム内の費用（reset_cost_probe の最初の版，出力の最後の部分だけ）**：Watering 50,200,800,3200,12800,51200,205000,819000,3280000（木），Utilities かぼちゃ 1000，Variables にんじん 35 で wiki の表と一致．最大段階を超えると `get_cost(u, k)` は `{}` を返す（None ではない）．
-- 次：`probes/reset_cost_probe.py`（1アンロック1行に直した版）と `probes/reset_levels_probe.py`（simulate で段階を変え，盤面の大きさ・機数・植える費用を出す．子は reset_state_child.py）を実行してもらう．
+- **ゲーム内の全アンロックの費用（reset_cost_probe，2026-09-29）**：`docs/fastest_reset_wiki.md` 2 節の表（wiki の Unlocks_Data）と**すべて一致**．Speed は Hay 20 → Wood 20 → Wood 50＋Carrot 50 → Carrot 500 → Carrot 1000 の5段階．Leaderboard は Bone 2,000,000 ＋ Gold 1,000,000．
+- **植える費用（reset_levels_probe，simulate で段階を1つだけ指定）**：にんじん（Carrots 段階 k）は Hay・Wood 各 1,1,2,4（k=0..3．k≥1 で 2^(k−1)），かぼちゃ（Pumpkins）は Carrot 1,1,2,4，サボテン（Cactus）は Pumpkin 2,2,4,8（k≥1 で 2^k），リンゴ（Dinosaurs）は Cactus 2,2,4,8．simulate は1回 0.1 秒．Expand・Megafarm の段の出力は貼られた範囲に入っていなかった（出力ページの前の方が切れる．1回の出力は約100行までにする）．
+- 次：`probes/reset_yield_probe.py`（子は reset_yield_child.py・reset_size_child.py）で，段階ごとの収穫量，Speed ごとの1秒あたりの tick，Expand ごとの盤面の大きさ，Megafarm ごとの機数を出す（1回の simulate につき2行）．
 
 ---
 

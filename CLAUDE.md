@@ -345,6 +345,18 @@ experiments/    採用しなかった版
 
 ---
 
+## 5c. 最速リセット（Leaderboards.Fastest_Reset）★次の課題（2026-09-29）
+
+ゲーム内の説明（ユーザーが貼ったもの）：
+- 単一の農地（1マス）から始めて，`Unlocks.Leaderboard` をアンロックするまでを完全に自動化する．すべてをアンロックする必要はない．
+- `num_unlocked(unlock) > 0` でアンロック済みかを確かめ，`get_cost(unlock)` で費用を見て，必要な作物を自動で育てる．
+- 起動：`leaderboard_run(Leaderboards.Fastest_Reset, filename, speedup)`．
+- 同等のシミュレーション：`simulate(filename, unlocks, items, globals, seed, speedup)`（unlocks = {}，items = {}，globals = {}，seed = -1 は乱数）．**unlocks と items を指定して途中の状態から試せる**（推定：部分ごとの計測に使える）．
+- 成功条件：`num_unlocked(Unlocks.Leaderboard) > 0`．
+- 不明：アンロックの一覧と各段階の費用，前提条件，何で計測するか（tick か）．wiki はこの環境から開けない → ゲーム内で調べる．
+
+---
+
 ## 6. 作業手順の決まりごと
 
 ### 6.1 変更のたびに行う検証

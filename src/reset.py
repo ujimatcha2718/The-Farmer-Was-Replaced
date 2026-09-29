@@ -34,7 +34,7 @@ SEQ = [
 	Unlocks.Mazes, Unlocks.Mazes, Unlocks.Mazes, Unlocks.Megafarm, Unlocks.Megafarm, Unlocks.Megafarm,
 	Unlocks.Pumpkins, Unlocks.Carrots, Unlocks.Trees, Unlocks.Expand, Unlocks.Cactus, Unlocks.Mazes,
 	Unlocks.Megafarm, Unlocks.Dinosaurs, Unlocks.Dinosaurs, Unlocks.Dinosaurs, Unlocks.Dinosaurs,
-	Unlocks.Mazes, Unlocks.Dinosaurs, Unlocks.Leaderboard
+	Unlocks.Leaderboard
 ]
 START = 0             # SEQ のこの番号から始める（試験用．通常は 0）
 STOP = 999            # SEQ のこの番号の手前で止める（試験用）
